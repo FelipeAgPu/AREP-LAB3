@@ -1,21 +1,27 @@
 package eci;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public class HttpServer {
-    public static void main(String[] args) throws IOException {
-        int port = Integer.parseInt(System.getenv("PORT"));
+    private static final MimeTypeGenerator generator = new MimeTypeGenerator();
+    public static void main(String[] args) throws IOException, URISyntaxException {
+        //int port = Integer.parseInt(System.getenv("PORT"));
+        int port = 5000;
 
         ServerSocket serverSocket = null;
         try {
             serverSocket = new ServerSocket(port);
         } catch (IOException e) {
-            System.err.println("Could not listen on port: 35000.");
+            System.err.printf("Could not listen on port: %s.%n",port);
             System.exit(1);
         }
         Boolean running = Boolean.TRUE;
@@ -31,30 +37,27 @@ public class HttpServer {
 
             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
             BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-            String inputLine, outputLine = "";
+            String inputLine, outputLine;
+            URI path = new URI("");
 
             while ((inputLine = in.readLine()) != null) {
                 System.out.println("Received: " + inputLine);
+
                 if (!in.ready()) {
                     break;
-                }else if(inputLine.equals("GET / HTTP/1.1")){
-                    outputLine = "HTTP/1.1 200 OK \r\n"
-                            + "Content-type: text/html \r\n"
-                            + "\r\n"
-                            + generateForm();
-                }else if(inputLine.contains("GET /hello")){
-                    String name = inputLine.substring(16,inputLine.length()-9);
-                    outputLine = "HTTP/1.1 200 OK \r\n"
-                            + "Content-type: text/html \r\n"
-                            + "\r\n"
-                            + hello(name);
-                }else if(inputLine.contains("POST /hellopost")){
-                    String name = inputLine.substring(21,inputLine.length()-9);
-                    outputLine = "HTTP/1.1 200 OK \r\n"
-                            + "Content-type: text/html \r\n"
-                            + "\r\n"
-                            + hello(name);
                 }
+                try {
+                    path = new URI(inputLine.split(" ")[1]);
+                }catch (Exception e){
+                    System.out.println(e);
+                }
+                break;
+            }
+
+            try {
+                outputLine = getHeaders(200, getType(path)) + getFile(path.getPath());
+            }catch (IOException e){
+                outputLine = getHeaders(404, "text/html") + getFile("404.html");
             }
 
             out.println(outputLine);
@@ -66,70 +69,35 @@ public class HttpServer {
         serverSocket.close();
     }
 
-    private static String generateForm(){
-        return "<!DOCTYPE html>\n" +
-                "<html>\n" +
-                "    <head>\n" +
-                "        <title>Form Example</title>\n" +
-                "        <meta charset=\"UTF-8\">\n" +
-                "        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
-                "    </head>\n" +
-                "    <body>\n" +
-                "        <h1>Form with GET</h1>\n" +
-                "        <form action=\"/hello\">\n" +
-                "            <label for=\"name\">Name:</label><br>\n" +
-                "            <input type=\"text\" id=\"name\" name=\"name\" value=\"John\"><br><br>\n" +
-                "            <input type=\"button\" value=\"Submit\" onclick=\"loadGetMsg()\">\n" +
-                "        </form> \n" +
-                "        <div id=\"getrespmsg\"></div>\n" +
-                "\n" +
-                "        <script>\n" +
-                "            function loadGetMsg() {\n" +
-                "                let nameVar = document.getElementById(\"name\").value;\n" +
-                "                const xhttp = new XMLHttpRequest();\n" +
-                "                xhttp.onload = function() {\n" +
-                "                    document.getElementById(\"getrespmsg\").innerHTML =\n" +
-                "                    this.responseText;\n" +
-                "                }\n" +
-                "                xhttp.open(\"GET\", \"/hello?name=\"+nameVar);\n" +
-                "                xhttp.send();\n" +
-                "            }\n" +
-                "        </script>\n" +
-                "\n" +
-                "        <h1>Form with POST</h1>\n" +
-                "        <form action=\"/hellopost\">\n" +
-                "            <label for=\"postname\">Name:</label><br>\n" +
-                "            <input type=\"text\" id=\"postname\" name=\"name\" value=\"John\"><br><br>\n" +
-                "            <input type=\"button\" value=\"Submit\" onclick=\"loadPostMsg(postname)\">\n" +
-                "        </form>\n" +
-                "        \n" +
-                "        <div id=\"postrespmsg\"></div>\n" +
-                "        \n" +
-                "        <script>\n" +
-                "            function loadPostMsg(name){\n" +
-                "                let url = \"/hellopost?name=\" + name.value;\n" +
-                "\n" +
-                "                fetch (url, {method: 'POST'})\n" +
-                "                    .then(x => x.text())\n" +
-                "                    .then(y => document.getElementById(\"postrespmsg\").innerHTML = y);\n" +
-                "            }\n" +
-                "        </script>\n" +
-                "    </body>\n" +
-                "</html>";
+    private static String getType(URI uri) {
+        String type;
+        try {
+            type = uri.getPath().split("\\.")[1];
+        } catch (Exception e) {
+            return generator.getType("html");
+        }
+
+        return generator.getType(type);
     }
 
-    public static String hello(String name){
-        return "<!DOCTYPE html>\n" +
-                "<html>\n" +
-                "    <head>\n" +
-                "        <title>Hello</title>\n" +
-                "        <meta charset=\"UTF-8\">\n" +
-                "        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
-                "    </head>\n" +
-                "    <body>\n" +
-                "        <h1> Hello " + name + "</h1>\n" +
-                "    </body>\n" +
-                "</html>";
+    private static  String getHeaders(int code, String type){
+        return String.format("HTTP/1.1 %s OK \r\n"
+                + "Content-type: %s \r\n"
+                + "\r\n", code, type);
+    }
+
+    public static String getFile(String route) throws IOException {
+        Path path = FileSystems.getDefault().getPath("src/main/resources", route);
+
+        Charset charset = StandardCharsets.US_ASCII;
+        StringBuilder file = new StringBuilder();
+        BufferedReader reader = Files.newBufferedReader(path, charset);
+        String line = null;
+        while ((line = reader.readLine()) != null) {
+            file.append(line).append("\n");
+        }
+
+        return file.toString();
     }
 }
 
