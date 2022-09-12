@@ -1,5 +1,7 @@
 package eci;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -35,6 +37,7 @@ public class HttpServer {
                 System.exit(1);
             }
 
+            OutputStream outputStream = clientSocket.getOutputStream();
             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
             BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             String inputLine, outputLine;
@@ -55,9 +58,9 @@ public class HttpServer {
             }
 
             try {
-                outputLine = getHeaders(200, getType(path)) + getFile(path.getPath());
+                outputLine = getHeaders(200, getType(path)) + getFile(path.getPath(), outputStream);
             }catch (IOException e){
-                outputLine = getHeaders(404, "text/html") + getFile("404.html");
+                outputLine = getHeaders(404, "text/html") + getFile("404.html", outputStream);
             }
 
             out.println(outputLine);
@@ -86,9 +89,24 @@ public class HttpServer {
                 + "\r\n", code, type);
     }
 
-    public static String getFile(String route) throws IOException {
+    public static String getFile(String route, OutputStream outputStream) throws IOException {
         Path path = FileSystems.getDefault().getPath("src/main/resources", route);
+        try {
+            switch (route.split("\\.")[1]) {
+                case "png":
+                    return getImage(path, outputStream);
+                default:
+                    return getText(path);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (ArrayIndexOutOfBoundsException e){
+            return getText(FileSystems.getDefault().getPath("src/main/resources", "404.html"));
+        }
+        return null;
+    }
 
+    public static String getText(Path path) throws IOException {
         Charset charset = StandardCharsets.US_ASCII;
         StringBuilder file = new StringBuilder();
         BufferedReader reader = Files.newBufferedReader(path, charset);
@@ -98,6 +116,20 @@ public class HttpServer {
         }
 
         return file.toString();
+    }
+
+    static String getImage(Path file, OutputStream outputStream) throws IOException{
+        String response = "HTTP/1.1 200 OK\r\n"
+                + "Content-Type: image/png\r\n"
+                + "\r\n";
+        BufferedImage bufferedImage = ImageIO.read(new File(file.toUri()));
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
+        ImageIO.write(bufferedImage, "png", byteArrayOutputStream);
+        dataOutputStream.writeBytes(response);
+        dataOutputStream.write(byteArrayOutputStream.toByteArray());
+
+        return response;
     }
 }
 
